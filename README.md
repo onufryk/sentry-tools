@@ -1,6 +1,6 @@
 # Script to parse Sentry issues and events and analyze source code of stack traces
 
-## Prerequisited
+## Prerequisites
 
 - python 2.7
 - pip
