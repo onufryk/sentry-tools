@@ -50,63 +50,68 @@ def parse_paging_links(link_header):
 	return (prev_link, next_link)
 
 
-def fetch_issues_page(fetch_url=None, page_num=1):
-	if not fetch_url:
-		fetch_url = 'https://sentry.io/api/0/projects/optimizelycom/www/issues/'
-
-	logging.debug('Fetching issues from page {:>2}.'.format(page_num))
-	logging.debug('URL is {}'.format(fetch_url))
+def fetch_issues_page():
+	logging.info('Fetching issues with query "{}"'.format(exception_query))
+	fetch_url = 'https://sentry.io/api/0/projects/optimizelycom/www/issues/'
+	page_num = 1
 
 	payload = {'query': exception_query}
 	auth_headers = {'Authorization': 'Bearer {}'.format(sentry_api_token)}
-	issues_resp = requests.get(fetch_url, headers = auth_headers, params=payload)
 
-	if issues_resp.status_code != 200:
-		raise ('Failed to get list of issues.')
+	while fetch_url:
 
-	issues = issues_resp.json()
-	all_issues.extend(issues)
+		logging.debug('Fetching issues from page {:>2}.'.format(page_num))
+		logging.debug('URL is {}'.format(fetch_url))
 
-	logging.debug('Fetched {:>3} issues on page {:>2}.'.format(len(issues), page_num))
+		issues_resp = requests.get(fetch_url, headers = auth_headers, params=payload)
 
-	prev_link, next_link = parse_paging_links(issues_resp.headers.get('Link'))
-	logging.debug('Previous link: {}'.format(prev_link))
-	logging.debug('Next     link: {}'.format(next_link))
-	if (next_link):
-		logging.debug('Checking next page.')
-		fetch_issues_page(fetch_url=next_link, page_num=page_num + 1)
-	else:
-		all_issues_fetched()
+		if issues_resp.status_code != 200:
+			raise ('Failed to get list of issues.')
+
+		issues = issues_resp.json()
+		all_issues.extend(issues)
+
+		logging.info('Fetched {:>3} issues on page {:>2}.'.format(len(issues), page_num))
+
+		prev_link, next_link = parse_paging_links(issues_resp.headers.get('Link'))
+		logging.debug('Previous link: {}'.format(prev_link))
+		logging.debug('Next     link: {}'.format(next_link))
+
+		fetch_url = next_link
+		page_num += 1
+	
+	all_issues_fetched()
 
 
 def fetch_events_page(issue_id=None, fetch_url=None, page_num=1):
 	if not issue_id:
 		raise('Can not fetch event without issue ID.')
 
-	if not fetch_url:
-		fetch_url = 'https://sentry.io/api/0/issues/{}/events/'.format(issue_id)
-
-	logging.debug('Fetching events for issue {} from page {:>2}.'.format(issue_id, page_num))
-	logging.debug('URL is {}'.format(fetch_url))
-
+	fetch_url = 'https://sentry.io/api/0/issues/{}/events/'.format(issue_id)
+	page_num = 1
 	auth_headers = {'Authorization': 'Bearer {}'.format(sentry_api_token)}
-	events_resp = requests.get(fetch_url, headers = auth_headers)
 
-	if events_resp.status_code != 200:
-		raise ('Failed to get list of events.')
+	while fetch_url:
 
-	events = events_resp.json()
-	all_events.extend(events)
-	logging.debug('Fetched {:>3} events on page {:>2}.'.format(len(events), page_num))
+		logging.debug('Fetching events for issue {} from page {:>2}.'.format(issue_id, page_num))
+		logging.debug('URL is {}'.format(fetch_url))
 
-	prev_link, next_link = parse_paging_links(events_resp.headers.get('Link'))
-	logging.debug('Previous link: {}'.format(prev_link))
-	logging.debug('Next     link: {}'.format(next_link))
-	if (next_link):
-		logging.debug('Checking next page.')
-		fetch_events_page(issue_id=issue_id, fetch_url=next_link, page_num=page_num + 1)
-	else:
-		all_events_fetched(issue_id)
+		events_resp = requests.get(fetch_url, headers = auth_headers)
+
+		if events_resp.status_code != 200:
+			raise ('Failed to get list of events.')
+
+		events = events_resp.json()
+		all_events.extend(events)
+		logging.debug('Fetched {:>3} events on page {:>2}.'.format(len(events), page_num))
+
+		prev_link, next_link = parse_paging_links(events_resp.headers.get('Link'))
+		logging.debug('Previous link: {}'.format(prev_link))
+		logging.debug('Next     link: {}'.format(next_link))
+
+		fetch_url = next_link
+		page_num += 1
+
 
 def all_issues_fetched():
 	logging.info('Totally fetched {:>4} issues.'.format(len(all_issues)))
@@ -116,7 +121,9 @@ def all_issues_fetched():
 	with open('issues.json', 'w') as f:
 		json.dump(all_issues, f, indent=2)
 
+	issues_fetched = 0.0
 	for issue in all_issues:
+		issues_fetched += 1
 		logging.debug('{:-^100}'.format(' ' + issue['id'] + ' '))
 		logging.debug(issue['title'])
 		logging.debug(issue['metadata']['type'])
@@ -125,32 +132,24 @@ def all_issues_fetched():
 		logging.debug('The issue is seen by {:>3} users.'.format(issue['userCount']))
 		logging.debug('The issue has {:>3} events.'.format(issue['count']))
 		culprits.add(issue['culprit'])
-		logging.debug('Fetching {:>5} events for issue {}'.format(issue['count'], issue['id']))
+		logging.info('Fetching {:>5} events for issue {}. Progress {:3.1f}%.'.format(issue['count'], issue['id'], issues_fetched/len(all_issues)*100))
 		fetch_events_page(issue_id=issue['id'])
 
 	if (len(culprits) > 0):
-		logging.info('All detected culprits:')
-		for culprit in culprits:
+		logging.info('All detected {} culprits:'.format(len(culprits)))
+		for culprit in sorted(culprits):
 			logging.info('\t{}'.format(culprit))
 
+	all_events_fetched()
 
-def all_events_fetched(issue_id=None):
-	if issue_id:
-		if issue_id in issues_events_semaphores:
-			raise('Duplicated fetch for {}'.format(issue_id))
 
-		issues_events_semaphores.append(issue_id)
+def all_events_fetched():
+	logging.info('Totally fetched {:>4} events.'.format(len(all_events)))
 
-		logging.info('Fetched {:>4} events so far, last issue {}.'.format(len(all_events), issue_id))
-		logging.info('Processed {:>5} issues of {:>5}'.format(len(issues_events_semaphores), len(all_issues)))
+	with open('events.json', 'w') as f:
+		json.dump(all_events, f, indent=2)
 
-		if (len(issues_events_semaphores) == len(all_issues)):
-			logging.info('Totally fetched {:>4} events.'.format(len(all_events)))
-			with open('events.json', 'w') as f:
-				json.dump(all_events, f, indent=2)
-			analyze_all_events()
-	else:
-		analyze_all_events()
+	analyze_all_events()
 
 
 def analyze_all_events():
