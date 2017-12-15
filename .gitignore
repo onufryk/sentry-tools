@@ -1,4 +1,6 @@
 .virtualenv
 events.json
 issues.json
+*.json
+*.zip
 
