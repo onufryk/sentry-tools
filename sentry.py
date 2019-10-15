@@ -19,6 +19,8 @@ sentry_api_token = None
 all_issues = []
 all_events = []
 issues_events_semaphores = []
+culprits = set()
+
 
 def parse_paging_links(link_header):
 	links = re.split('\s*,\s*', link_header)
@@ -116,8 +118,6 @@ def fetch_events_page(issue_id=None, fetch_url=None, page_num=1):
 def all_issues_fetched():
 	logging.info('Totally fetched {:>4} issues.'.format(len(all_issues)))
 
-	culprits = set()
-
 	with open('issues.json', 'w') as f:
 		json.dump(all_issues, f, indent=2)
 
@@ -162,6 +162,8 @@ def analyze_all_events():
 	events_sources_commons = {}
 
 	for event in all_events:
+		if 'entries' not in event:
+			continue
 
 		for event_entry in event['entries']:
 			if (event_entry['type'] == 'exception'):
@@ -232,20 +234,34 @@ def analyze_all_events():
 		for common_trace_line in common_trace:
 			logging.debug('\t{}'.format(common_trace_line))
 
-	most_used_key, most_used_count = event_sources_sorted_by_usage[-1]
-	logging.info('The 1st most frequent ({} times) cause of error is:'.format(most_used_count))
-	for source_line in events_sources_hashmap[most_used_key]:
-		logging.info('\t{}'.format(source_line))
+	all_culprits = {}
+	for issue in all_issues:
+		if issue['culprit'] not in all_culprits:
+			all_culprits[issue['culprit']] = 0
 
-	most_used_key, most_used_count = event_sources_sorted_by_usage[-2]
-	logging.info('The 2nd most frequent ({} times) cause of error is:'.format(most_used_count))
-	for source_line in events_sources_hashmap[most_used_key]:
-		logging.info('\t{}'.format(source_line))
+		all_culprits[issue['culprit']] += 1
 
-	most_used_key, most_used_count = event_sources_sorted_by_usage[-3]
-	logging.info('The 3rd most frequent ({} times) cause of error is:'.format(most_used_count))
-	for source_line in events_sources_hashmap[most_used_key]:
-		logging.info('\t{}'.format(source_line))
+	if (len(all_culprits) > 0):
+		logging.info('All detected {} culprits:'.format(len(all_culprits)))
+		for culprit, frequency in reversed(sorted(all_culprits.iteritems(), key=lambda (k,v): (v,k))):
+			print '{:80s} | {:3d}'.format(culprit, frequency)
+
+
+	if len(event_sources_sorted_by_usage) > 0:
+		most_used_key, most_used_count = event_sources_sorted_by_usage[-1]
+		logging.info('The 1st most frequent ({} times) cause of error is:'.format(most_used_count))
+		for source_line in events_sources_hashmap[most_used_key]:
+			logging.info('\t{}'.format(source_line))
+
+		most_used_key, most_used_count = event_sources_sorted_by_usage[-2]
+		logging.info('The 2nd most frequent ({} times) cause of error is:'.format(most_used_count))
+		for source_line in events_sources_hashmap[most_used_key]:
+			logging.info('\t{}'.format(source_line))
+
+		most_used_key, most_used_count = event_sources_sorted_by_usage[-3]
+		logging.info('The 3rd most frequent ({} times) cause of error is:'.format(most_used_count))
+		for source_line in events_sources_hashmap[most_used_key]:
+			logging.info('\t{}'.format(source_line))
 
 
 
